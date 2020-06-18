@@ -206,9 +206,9 @@ class MailboxHandler extends PFAHandler {
 
     protected function read_from_db_postprocess($db_result) {
         foreach ($db_result as $key => $row) {
-            if (isset($row['quota'])) { # quota could be disabled in $struct
+            if (isset($row['quota']) && is_numeric($row['quota']) && $row['quota'] > -1) { # quota could be disabled in $struct
                 $db_result[$key]['quotabytes'] = $row['quota'];
-                $db_result[$key]['quota'] = divide_quota($row['quota']); # convert quota to MB
+                $db_result[$key]['quota'] = divide_quota( (int) $row['quota']); # convert quota to MB
             } else {
                 $db_result[$key]['quotabytes'] = -1;
                 $db_result[$key]['quota'] = -1;
@@ -219,12 +219,17 @@ class MailboxHandler extends PFAHandler {
 
 
     protected function beforestore() {
-        if (isset($this->values['quota']) && $this->values['quota'] != -1) {
+        if (isset($this->values['quota']) && $this->values['quota'] != -1 && is_numeric($this->values['quota'])) {
             $multiplier = Config::read_string('quota_multiplier');
             if ($multiplier == 0 || !is_numeric($multiplier)) { // or empty string, or null, or false...
                 $multiplier = 1;
             }
             $this->values['quota'] = $this->values['quota'] * $multiplier; # convert quota from MB to bytes
+        }
+
+        // Avoid trying to store '' in an integer field
+        if ($this->values['quota'] === '') {
+            $this->values['quota'] = 0;
         }
 
         $ah = new AliasHandler($this->new, $this->admin_username);
@@ -271,9 +276,14 @@ class MailboxHandler extends PFAHandler {
         return true;
     }
 
+    protected function setmore(array $values) {
+        if (array_key_exists('quota', $this->values)) {
+            $this->values['quota'] = (int)$this->values['quota'];
+        }
+    }
 
     // Could perhaps also use _validate_local_part($new_value) { .... }
-    public function set($values) {
+    public function set(array $values) {
         // See: https://github.com/postfixadmin/postfixadmin/issues/282 - ensure the 'local_part' does not contain an @ sign.
         $ok = true;
         if (isset($values['local_part']) && strpos($values['local_part'], '@')) {

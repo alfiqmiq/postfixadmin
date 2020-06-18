@@ -137,9 +137,8 @@ class AliasHandler extends PFAHandler {
      * It also calls parent::init()
      */
     public function init($id) {
-
         $bits = explode('@', $id);
-        if(sizeof($bits) == 2) {
+        if (sizeof($bits) == 2) {
             $local_part = $bits[0];
             $domain = $bits[1];
             if ($local_part == '*') { # catchall - postfix expects '@domain', not '*@domain'
@@ -255,7 +254,7 @@ class AliasHandler extends PFAHandler {
         }
     }
 
-    protected function setmore($values) {
+    protected function setmore(array $values) {
         if ($this->new) {
             if ($this->struct['address']['display_in_form'] == 1) { # default mode - split off 'domain' field from 'address' # TODO: do this unconditional?
                 list(/*NULL*/, $domain) = explode('@', $values['address']);
@@ -312,7 +311,10 @@ class AliasHandler extends PFAHandler {
     protected function read_from_db_postprocess($db_result) {
         foreach ($db_result as $key => $value) {
             # split comma-separated 'goto' into an array
-            $db_result[$key]['goto'] = explode(',', $db_result[$key]['goto']);
+            $goto = $db_result[$key]['goto'] ?? null;
+            if (is_string($goto)) {
+                $db_result[$key]['goto'] = explode(',', $goto);
+            }
 
             # Vacation enabled?
             list($db_result[$key]['on_vacation'], $db_result[$key]['goto']) = remove_from_array($db_result[$key]['goto'], $this->getVacationAlias());

@@ -161,21 +161,28 @@ function _flash_string($type, $string) {
 function check_language($use_post = true) {
     global $supported_languages; # from languages/languages.php
 
+    // prefer a $_POST['lang'] if present
+    if ($use_post && safepost('lang')) {
+        $lang = safepost('lang');
+        if (is_string($lang) && array_key_exists($lang, $supported_languages)) {
+            return $lang;
+        }
+    }
+
+    // Failing that, is there a $_COOKIE['lang'] ?
+    if (safecookie('lang')) {
+        $lang = safecookie('lang');
+        if (is_string($lang) && array_key_exists($lang, $supported_languages)) {
+            return $lang;
+        }
+    }
+
     $lang = Config::read_string('default_language');
 
-    if (isset($_SERVER['HTTP_ACCEPT_LANGUAGE'])) {
+    // If not, did the browser give us any hint(s)?
+    if (!empty($_SERVER['HTTP_ACCEPT_LANGUAGE'])) {
         $lang_array = preg_split('/(\s*,\s*)/', $_SERVER['HTTP_ACCEPT_LANGUAGE']);
-        if (safecookie('lang')) {
-            array_unshift($lang_array, safecookie('lang')); # prefer language from cookie
-        }
-        if ($use_post && safepost('lang')) {
-            array_unshift($lang_array, safepost('lang')); # but prefer $_POST['lang'] even more
-        }
-
         foreach ($lang_array as $value) {
-            if (!is_string($value)) {
-                continue;
-            }
             $lang_next = strtolower(trim($value));
             $lang_next = preg_replace('/;.*$/', '', $lang_next); # remove things like ";q=0.8"
             if (array_key_exists($lang_next, $supported_languages)) {
@@ -240,6 +247,9 @@ function check_domain($domain) {
             } elseif (checkdnsrr($domain, 'A')) {
                 $retval = '';
             } elseif (checkdnsrr($domain, 'MX')) {
+                $retval = '';
+            } elseif (checkdnsrr($domain, 'NS')) {
+                error_log("DNS is not correctly configured for $domain to send or receive email");
                 $retval = '';
             } else {
                 $retval = sprintf(Config::lang('pInvalidDomainDNS'), htmlentities($domain));
@@ -1215,6 +1225,8 @@ function pacrypt($pw, $pw_db="") {
             return _pacrypt_mysql_encrypt($pw, $pw_db);
         case 'authlib':
             return _pacrypt_authlib($pw, $pw_db);
+        case 'sha512.b64':
+            return _pacrypt_sha512_b64($pw, $pw_db);
     }
 
     if (preg_match("/^dovecot:/", $CONF['encrypt'])) {
@@ -1226,6 +1238,34 @@ function pacrypt($pw, $pw_db="") {
     }
 
     throw new Exception('unknown/invalid $CONF["encrypt"] setting: ' . $CONF['encrypt']);
+}
+
+/**
+ * @see https://github.com/postfixadmin/postfixadmin/issues/58
+ */
+function _pacrypt_sha512_b64($pw, $pw_db="") {
+    if (!function_exists('random_bytes') || !function_exists('crypt') || !defined('CRYPT_SHA512') || !function_exists('mb_substr')) {
+        throw new Exception("sha512.b64 not supported!");
+    }
+    if (!$pw_db) {
+        $salt = mb_substr(rtrim(base64_encode(random_bytes(16)),'='),0,16,'8bit');
+        return '{SHA512-CRYPT.B64}'.base64_encode(crypt($pw,'$6$'.$salt));
+    }
+
+
+    $password="#Thepasswordcannotbeverified";
+    if (strncmp($pw_db,'{SHA512-CRYPT.B64}',18)==0) {
+        $dcpwd = base64_decode(mb_substr($pw_db,18,null,'8bit'),true);
+        if ($dcpwd !== false && !empty($dcpwd) && strncmp($dcpwd,'$6$',3)==0) {
+            $password = '{SHA512-CRYPT.B64}'.base64_encode(crypt($pw,$dcpwd));
+        }
+    } elseif (strncmp($pw_db,'{MD5-CRYPT}',11)==0) {
+        $dcpwd = mb_substr($pw_db,11,null,'8bit');
+        if (!empty($dcpwd) && strncmp($dcpwd,'$1$',3)==0) {
+            $password = '{MD5-CRYPT}'.crypt($pw,$dcpwd);
+        }
+    }
+    return $password;
 }
 
 /**
@@ -1517,10 +1557,19 @@ function db_connect() {
             $dsn = "mysql:host={$CONF['database_host']};dbname={$database_name};charset=UTF8";
         }
         if (Config::bool('database_use_ssl')) {
+            $options[PDO::MYSQL_ATTR_SSL_KEY] = Config::read_string('database_ssl_key');
             $options[PDO::MYSQL_ATTR_SSL_CA] = Config::read_string('database_ssl_ca');
             $options[PDO::MYSQL_ATTR_SSL_CAPATH] = Config::read_string('database_ssl_ca_path');
             $options[PDO::MYSQL_ATTR_SSL_CERT] = Config::read_string('database_ssl_cert');
             $options[PDO::MYSQL_ATTR_SSL_CIPHER] = Config::read_string('database_ssl_cipher');
+            $options = array_filter($options); // remove empty settings.
+
+            $verify = Config::read('database_ssl_verify_server_cert');
+            if ($verify === null) { // undefined
+                $verify = true;
+            }
+
+            $options[PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT] = (bool)$verify;
         }
         $queries[] = 'SET CHARACTER SET utf8';
         $queries[] = "SET COLLATION_CONNECTION='utf8_general_ci'";

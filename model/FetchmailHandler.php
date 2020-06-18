@@ -85,7 +85,7 @@ class FetchmailHandler extends PFAHandler {
     }
 
 
-    protected function setmore($values) {
+    protected function setmore(array $values) {
         # set domain based on the target mailbox
         if ($this->new || isset($values['mailbox'])) {
             list(/*NULL*/, $domain) = explode('@', $values['mailbox']);
@@ -172,6 +172,10 @@ class FetchmailHandler extends PFAHandler {
             return false;
         }
         return true;
+    }
+
+    public function domain_from_id() {
+        return '';
     }
 }
 
